@@ -6,7 +6,7 @@ Each agent has a home, job, and two store locations. Each day is broken up into 
 These agent-based models simulate disease based on the SEIR compartmental model, where agents are in one of four compartments (susceptible, exposed, infectious, and recovered), beginning as susceptible by default, and flowing through them linearly when infectious (apart from the initially infectious agents defined at time step 0, who begin in the infectious compartment). Agents can spend any amount of time in the suscpetible compartment until infected, at which point they exist in the other 3 compartments one by one for some normally distributed amount of time specific to each compartment.
 
 ### RDDL Notes
-The RDDL model does not currently make any use of the planner. It is simply a standard agent-based model that can be readily adapted to perform some planning-related task. The problem file given alongside the domain was generated based on Kingston Geography, with about 100 agents.
+The RDDL directory is subdiveded into two directories - General and RDDPS. The General model is a RDDL model that does not make use of the planner in any way - it is simply an agent-based model that can be readily adapted to perform some planning task. The RDDPS model makes direct use of the planner by having it implement mask/vaccine mandates on the population with the aim of minimizing mandate uptime while minimizing the number of hospitalizations over some user-defined capacity. The problem files given alongside both domains were generated based on Kingston Geography, with about 100 agents.
 
 
 Disease_Models © 2024 by Bruce Chidley is licensed under Creative Commons Attribution 4.0 International 
