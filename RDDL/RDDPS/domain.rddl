@@ -1,0 +1,661 @@
+//Bruce Chidley, 20104323
+//CISC 813: Automated Planning
+
+
+domain covid-sim {
+
+	requirements = {
+		concurrent           // different agents are controlled independently
+	};
+
+	types {
+		agent : object;
+		infectious_level : {@mild, @severe, @critical};
+	};
+
+	pvariables {
+
+		// Action costs and penalties
+
+		PENALTY_MASK_MANDATE_ALL : {non-fluent, real, default = -20 }; // Penalty for each agent that is masked
+		PENALTY_VACCINE_MANDATE_ALL : {non-fluent, real, default = -20 }; // Penalty for each agent that is vaccinated
+		PENALTY_MASK_MANDATE_STUDENTS : {non-fluent, real, default = -20 }; // Penalty for each student that is masked
+		PENALTY_VACCINE_MANDATE_STUDENTS : {non-fluent, real, default = -20 }; // Penalty for each student that is vaccinated
+		PENALTY_NON_ICU_CAPACITY : {non-fluent, real, default = -100 }; //Penalty for exceeding capacity in non-ICU hospital beds
+		PENALTY_ICU_CAPACITY : {non-fluent, real, default = -100 }; //Penalty for exceeding capacity in ICU hospital beds
+
+		// Non-fluent variables
+
+		R_NAUGHT : {non-fluent, real, default = 3.32 }; // Basic reproductive number for COVID-19
+
+		MASK_FACTOR : {non-fluent, real, default = 0.8 }; // Factor for transmission reduction when masked
+		VACCINE_FACTOR : {non-fluent, real, default = 0.4 }; // Factor for transmission reduction when vaccinated
+		MASK_CHANCE : {non-fluent, real, default = 0.8 }; // Chance an individual wears a mask
+		HOSPITAL_BEDS_NON_ICU : {non-fluent, real, default = 2 }; //Total number of non-ICU hospital beds
+		HOSPITAL_BEDS_ICU : {non-fluent, real, default = 1 }; //Total number of non-ICU hospital beds
+
+		// The workplace an agent is working at (or store, if they are 70+)
+		AGENT_JOB(agent) : { non-fluent, int, default = 0 };
+
+		// The home an agent is living at
+		AGENT_HOME(agent) : { non-fluent, int, default = 0 };
+
+		// The stores an agent goes to
+		AGENT_STORE_1(agent) : { non-fluent, int, default = 0 };
+		AGENT_STORE_2(agent) : { non-fluent, int, default = 0 };
+
+		// The age of an agent
+		AGENT_AGE(agent) : { non-fluent, int, default = 0 };
+
+		// Describes whether an agent is a student or not
+		AGENT_STUDENT(agent) : { non-fluent, bool, default = false };
+
+		// State fluents
+
+		susceptible_count: { state-fluent, int, default = 0}; // Number of susceptible agents
+
+		exposed(agent) : { state-fluent, bool, default = false }; // agent currently exposed to COVID-19
+		exposed_total_time(agent) : { state-fluent, real, default = 10 }; // the total time an agent will remain in the exposed class
+		exposed_period(agent) : { state-fluent, real, default = 0.0 }; // time an agent has been in the exposed class
+
+		infectious(agent) : { state-fluent, bool, default = false }; // agent currently infectious with COVID-19
+		infectious_total_time(agent) : { state-fluent, real, default = 10 }; // the total time an agent will remain in the infectious class
+		infectious_period(agent) : { state-fluent, real, default = 0.0 }; // time an agent has been in the infectious class
+
+		isolating(agent) : { state-fluent, bool, default = false }; //Checks whether or not an agent is isolating
+		hospitalized_non_ICU(agent) : { state-fluent, bool, default = false }; //Checks whether or not an agent is hospitalized (not ICU)
+		hospitalized_ICU(agent) : { state-fluent, bool, default = false }; //Checks whether or not an agent is hospitalized (ICU)
+
+		recovered(agent) : { state-fluent, bool, default = false }; // agent currently recovered from COVID-19
+		recovered_total_time(agent) : { state-fluent, real, default = 10 }; // the total time an agent will remain in the recovered class
+		recovered_period(agent) : { state-fluent, real, default = 0.0 }; // time an agent has been in the recovered class
+
+		is_home(agent) : { state-fluent, bool, default = false }; // agent is currently at home
+		is_working(agent) : { state-fluent, bool, default = false }; // agent is currently at work
+		is_shopping(agent) : { state-fluent, bool, default = false }; // agent is currently shopping
+		masked(agent) : { state-fluent, bool, default = false }; // agent is currently wearing a mask
+		vaccinated(agent) : { state-fluent, bool, default = false }; // agent is currently vaccinated
+
+		day : { state-fluent, bool, default = true }; // Tracks the time of day (day or night)
+		day_of_week : { state-fluent, int, default = 1 }; // Tracks the day of the week (Monday = 1/2, ...,  Sunday = 13/14)
+
+		vaccine_implemented : { state-fluent, bool, default = false }; // vaccine mandate has been implemented for all agents
+		vaccine_implemented_students : { state-fluent, bool, default = false }; // vaccine mandate has been implemented for students
+
+		mask_counter: { state-fluent, int, default = 0}; //Tracks the length of time all agents have been masked, up to a max of 14
+		mask_counter_students: { state-fluent, int, default = 0}; //Tracks the length of time students have been masked, up to a max of 14
+
+		// Interm Fluents
+
+		mask-implemented : { interm-fluent, bool}; // mask mandate has been implemented for all agents
+		mask-implemented-students : { interm-fluent, bool}; // mask mandate has been implemented for students
+		weekday : { interm-fluent, bool};
+		weekend1 : { interm-fluent, bool};
+		weekend2 : { interm-fluent, bool};
+		susceptible(agent) : { interm-fluent, bool}; // agent is susceptible to catching disease
+		exposed-to-infectious(agent) : { interm-fluent, bool}; //Denotes that an agent is moving from the exposed to infected class
+		infectious-to-recovered(agent) : { interm-fluent, bool};//Denotes that an agent is moving from the infected to recovered class
+		recovered-to-susceptible(agent) : { interm-fluent, bool}; //Denotes that an agent is moving from the recovered to susceptible class
+		infectious-type(agent) : { interm-fluent, infectious_level, level = 1 };
+
+		// Action fluents
+
+		all_mask : { action-fluent, bool, default = false }; // Tell all agents to put on a masks
+		student_mask : { action-fluent, bool, default = false }; // Tell all students to put on a masks
+		all_vaccinate : { action-fluent, bool, default = false }; // Tell all agents to get vaccinated
+		student_vaccinate : { action-fluent, bool, default = false }; // Tell all students to get vaccinated
+
+	};
+
+	cpfs {
+
+		//Flips between true and false - day and night
+		day' = 
+			if (~day)
+				then true
+			else
+				false
+		;
+
+		//Ticks up to 14 and then goes back to 1. Each day is 2 ticks for day and nights
+		day_of_week' =
+			if (day_of_week == 14)
+				then 1
+			else
+				day_of_week + 1
+		;
+
+		weekday =
+			if (day_of_week <= 10)
+				then true
+			else
+				false
+		;
+
+		weekend1 =
+			if (day_of_week >= 11 ^ day_of_week <= 12)
+				then true
+			else
+				false
+		;
+
+		weekend2 =
+			if (day_of_week >= 13 ^ day_of_week <= 14)
+				then true
+			else
+				false
+		;
+
+		//Checks to see if an agent is at home - night = 1 = at home
+		is_home'(?a) = 
+			if (~day | isolating(?a) ^ ~(hospitalized_non_ICU(?a) | hospitalized_ICU(?a)))
+				then true
+			else
+				false
+		;
+		
+		//Checks to see if an agent is working - day + a weekday = working
+		is_working'(?a) =
+			if (day ^ weekday ^ ~isolating(?a) ^ ~(hospitalized_non_ICU(?a) | hospitalized_ICU(?a)))
+				then true
+			else
+				false
+		;
+		
+		//Checks to see if an agent is shopping - day + a weekend = shopping
+		is_shopping'(?a) =
+			if (day ^ (weekend1 | weekend2) ^ ~isolating(?a) ^ ~(hospitalized_non_ICU(?a) | hospitalized_ICU(?a)))
+				then true
+			else
+				false
+		;
+
+		//Counts the total number of susceptible agents
+		susceptible_count' =
+			sum_{?a : agent} [susceptible(?a)]
+		;
+
+		susceptible(?a) = 
+			if (~exposed(?a) ^ ~infectious(?a) ^ ~recovered(?a))
+				then true
+			else
+				false
+		;
+
+		//Calculates the time an agent will be in the exposed class
+		exposed_total_time'(?a) =
+			if (exposed_period(?a) == 1)
+				then Normal(9,2)
+			else
+				exposed_total_time(?a)
+		;
+
+		//Counts the current time in the exposed class
+		exposed_period'(?a) =
+			if (exposed(?a))
+				then exposed_period(?a) + 1
+			else
+				0
+		;
+
+		//If the time in exposed class exceeds the total time an agent should spend there, change to true
+		exposed-to-infectious(?a) =
+			if (exposed(?a) ^ (exposed_period(?a) >= exposed_total_time(?a)))
+				then true
+			else	
+				false
+		;
+
+		//Calculates whether an agent is exposed or not
+		exposed'(?a) =
+
+			//If working + susceptible, then perform: Bern(#infectious / total), multiplying each infectious agent + starting agent by MASK_FACTOR if wearing a mask, VACCINE_FACTOR if vaccinated
+			if (is_working(?a) ^ susceptible(?a))
+				then
+					if (
+						(sum_{?a2 : agent}
+						[
+							if ((AGENT_JOB(?a) == AGENT_JOB(?a2)) ^ infectious(?a2) ^ is_working(?a2))
+								then
+									Bernoulli(
+										((if (masked(?a)) then MASK_FACTOR else 1) * 
+										(if (masked(?a2)) then MASK_FACTOR else 1) *
+										(if (vaccinated(?a)) then VACCINE_FACTOR else 1)) *
+
+										(
+											R_NAUGHT / infectious_total_time(?a2) /
+
+											(1 + (sum_{?a3 : agent}[(AGENT_JOB(?a) == AGENT_JOB(?a3)) ^ susceptible(?a3)]))
+
+										)
+
+									)
+							else
+								false
+						]
+						)
+					 >= 1) then true
+					 else false
+
+			else if (is_home(?a) ^ susceptible(?a))
+				then
+					if (
+						(sum_{?a2 : agent}
+						[
+							if ((AGENT_HOME(?a) == AGENT_HOME(?a2)) ^ infectious(?a2) ^ is_home(?a2))
+								then
+									Bernoulli(
+										((if (masked(?a)) then MASK_FACTOR else 1) * 
+										(if (masked(?a2)) then MASK_FACTOR else 1) *
+										(if (vaccinated(?a)) then VACCINE_FACTOR else 1)) *
+
+										(
+											R_NAUGHT / infectious_total_time(?a2) /
+
+											(1 + (sum_{?a3 : agent}[(AGENT_HOME(?a) == AGENT_HOME(?a3)) ^ susceptible(?a3)]))
+
+										)
+
+									)
+							else
+								false
+						]
+						)
+					 >= 1) then true
+					 else false
+
+			//If shopping + susceptible, then perform: Bern(#infectious / total), multiplying each infectious agent + starting agent by MASK_FACTOR if wearing a mask,  VACCINE_FACTOR if vaccinated
+			else if (is_shopping(?a) ^ susceptible(?a))
+				then
+					if (weekend1)
+						then
+							if (
+								(sum_{?a2 : agent}
+								[
+									if ((AGENT_STORE_1(?a) == AGENT_STORE_1(?a2)) ^ infectious(?a2) ^ is_shopping(?a2))
+										then
+											Bernoulli(
+												((if (masked(?a)) then MASK_FACTOR else 1) * 
+												(if (masked(?a2)) then MASK_FACTOR else 1) *
+												(if (vaccinated(?a)) then VACCINE_FACTOR else 1)) *
+
+												(
+													R_NAUGHT / infectious_total_time(?a2) /
+
+													(1 + (sum_{?a3 : agent}[(AGENT_STORE_1(?a) == AGENT_STORE_1(?a3)) ^ susceptible(?a3)]))
+
+												)
+
+											)
+									else
+										false
+								]
+								)
+							>= 1) then true
+							else false
+							
+					else
+						if (
+							(sum_{?a2 : agent}
+							[
+								if ((AGENT_STORE_2(?a) == AGENT_STORE_2(?a2)) ^ infectious(?a2) ^ is_shopping(?a2))
+									then
+										Bernoulli(
+											((if (masked(?a)) then MASK_FACTOR else 1) * 
+											(if (masked(?a2)) then MASK_FACTOR else 1) *
+											(if (vaccinated(?a)) then VACCINE_FACTOR else 1)) *
+
+											(
+												R_NAUGHT / infectious_total_time(?a2) /
+
+												(1 + (sum_{?a3 : agent}[(AGENT_STORE_2(?a) == AGENT_STORE_2(?a3)) ^ susceptible(?a3)]))
+
+											)
+
+										)
+								else
+									false
+							]
+							)
+						>= 1) then true
+						else false
+
+
+			//If already in exposed class, then changes it to false if counter exceeds total time
+			else if (exposed-to-infectious(?a))
+				then false
+
+			//Otherwise, just keep things how they are (False)	
+			else
+				exposed(?a)
+		;
+
+		//Calculates the time an agent will be in the infectious class
+		infectious_total_time'(?a) =
+			if (exposed-to-infectious(?a))
+				then
+					switch (infectious-type(?a)) {
+						case @mild : Normal(16,4),
+						case @severe : Normal(36.2,8),
+						case @critical : Normal(36.2,8)
+					}
+			else
+				infectious_total_time(?a)
+			
+		;
+
+		//Counts the current time in the infectious class
+		infectious_period'(?a) =
+			if (infectious(?a))
+				then infectious_period(?a) + 1
+			else
+				0
+		;
+
+		//If the time in infectious class exceeds the total time an agent should spend there, change to true
+		infectious-to-recovered(?a) =
+			if (infectious(?a) ^ (infectious_period(?a) >= infectious_total_time(?a)))
+				then true
+			else	
+				false
+		;
+
+		//Calculates whether an agent is infectious or not
+		infectious'(?a) =
+
+			//If exposed and the counter exceeds total exposed time, then set infectious to be true
+			if (exposed-to-infectious(?a))
+				then true
+
+			//If infectious and the counter exceeds total infectious time, then set infectious to be false
+			else if (infectious-to-recovered(?a))
+				then false
+
+			//Otherwise, keep the same status
+			else
+				infectious(?a)
+		;
+
+		//Infection is either mild, severe, or critical, based on probabilities associated with age bracket
+		infectious-type(?a) =
+			if (exposed(?a) ^ (exposed_period(?a) >= exposed_total_time(?a)))
+				then
+					if (AGENT_AGE(?a) == 0)
+						then				
+							Discrete(infectious_level,
+										@mild : 0.99947,
+										@severe : 0.00050,
+										@critical : 0.00003
+							)
+					
+					else if (AGENT_AGE(?a) == 1)
+						then
+							Discrete(infectious_level,
+										@mild : 0.99827,
+										@severe : 0.00165,
+										@critical : 0.00008
+							)
+					else if (AGENT_AGE(?a) == 2)
+						then
+							Discrete(infectious_level,
+										@mild : 0.99244,
+										@severe : 0.00720,
+										@critical : 0.00036
+							)
+					else if (AGENT_AGE(?a) == 3)
+						then
+							Discrete(infectious_level,
+										@mild : 0.97816,
+										@severe : 0.02080,
+										@critical : 0.00104
+							)
+					else if (AGENT_AGE(?a) == 4)
+						then
+							Discrete(infectious_level,
+										@mild : 0.96354,
+										@severe : 0.03430,
+										@critical : 0.00216
+							)
+					else if (AGENT_AGE(?a) == 5)
+						then
+							Discrete(infectious_level,
+										@mild : 0.91417,
+										@severe : 0.07650,
+										@critical : 0.00933
+							)
+					else if (AGENT_AGE(?a) == 6)
+						then
+							Discrete(infectious_level,
+										@mild : 0.83081,
+										@severe : 0.13280,
+										@critical : 0.03639
+							)
+					else if (AGENT_AGE(?a) == 7)
+						then
+							Discrete(infectious_level,
+										@mild : 0.70422,
+										@severe : 0.20655,
+										@critical : 0.08923
+							)
+					else if (AGENT_AGE(?a) == 8)
+						then
+							Discrete(infectious_level,
+										@mild : 0.5801,
+										@severe : 0.24570,
+										@critical : 0.17420
+							)
+					else
+						@mild
+
+			else
+				@mild
+		;
+
+		//When an agent is infectious, they have some probability of isolating
+		isolating'(?a) =
+			if (exposed-to-infectious(?a))
+				then Bernoulli(0.5)
+			else if (infectious-to-recovered(?a))
+				then false
+			else
+				isolating(?a)
+		;
+
+		//When an agent becomes infectious, they have a chance to be hospitalized based on their age bracket
+		hospitalized_non_ICU'(?a) =
+			if (exposed-to-infectious(?a))
+				then
+					switch (infectious-type(?a)) {
+						case @mild : false,
+						case @severe : true,
+						case @critical : false
+					}
+
+			else if (infectious(?a))
+				then hospitalized_non_ICU(?a)
+
+			else
+				false
+		;
+
+		//When an agent becomes infectious, they have a chance to be put in the ICU based on their age bracket
+		hospitalized_ICU'(?a) = 
+			if (exposed-to-infectious(?a))
+				then
+					switch (infectious-type(?a)) {
+						case @mild : false,
+						case @severe : false,
+						case @critical : true
+					}
+
+			else if (infectious(?a))
+				then hospitalized_ICU(?a)
+
+			else
+				false
+		;
+
+		//Calculates the time an agent will be in the recovered class
+		recovered_total_time'(?a) =
+			if (infectious-to-recovered(?a))
+				then 14
+			else
+				recovered_total_time(?a)
+		;
+
+		//Counts the current time in the recovered class
+		recovered_period'(?a) =
+			if (recovered(?a))
+				then recovered_period(?a) + 1
+			else
+				0
+		;
+
+		//If the time in recovered class exceeds the total time an agent should spend there, change to true
+		recovered-to-susceptible(?a) =
+			if (recovered(?a) ^ (recovered_period(?a) >= recovered_total_time(?a)))
+				then true
+			else	
+				false
+		;
+
+		//Calculates whether an agent is recovered or not
+		recovered'(?a) =
+
+			//If exposed and the counter exceeds total exposed time, then set infectious to be true
+			if (infectious-to-recovered(?a))
+				then true
+
+			//If infectious and the counter exceeds total infectious time, then set infectious to be false
+			else if (recovered-to-susceptible(?a))
+				then false
+
+			//Otherwise, keep the same status
+			else
+				recovered(?a)
+		;
+			
+
+		//Puts mask on if all_mask is true, or if student_mask is true and the agent is a student, otherwise false
+		masked'(?a) = 
+			if ((all_mask ^ (~mask-implemented))| (student_mask ^ AGENT_STUDENT(?a) ^ (~mask-implemented-students)))
+				then Bernoulli(MASK_CHANCE)
+
+			else if (mask-implemented |mask-implemented-students)
+				then masked(?a)
+			
+			else
+				false
+		;
+		
+		//Keeps track of whether the vaccine has been implemented or not for all agents, so the planner can't just use the action over and over
+		vaccine_implemented' = 
+			if (all_vaccinate)
+				then true
+			else
+				vaccine_implemented
+		;
+
+		//Keeps track of whether the vaccine has been implemented or not for students, so the planner can't just use the action over and over
+		vaccine_implemented_students' = 
+			if (student_vaccinate)
+				then true
+			else
+				vaccine_implemented_students
+		;
+
+		mask_counter' = 
+			if (all_mask ^ (mask_counter == 0))
+				then 1
+			else if ((mask_counter >= 1) ^ (mask_counter <= 13))
+				then mask_counter + 1
+			else if (all_mask ^ (mask_counter == 14))
+				then 1
+			else
+				0
+		;
+
+		mask_counter_students' = 
+			if (student_mask ^ (mask_counter_students == 0))
+				then 1
+			else if ((mask_counter_students >= 1) ^ (mask_counter_students <= 13))
+				then mask_counter_students + 1
+			else if (student_mask ^ (mask_counter_students == 14))
+				then 1
+			else
+				0
+		;
+
+		//Keeps track of whether the mask mandate has been implemented or not for all agents
+		mask-implemented = 
+			if (mask_counter >= 1)
+				then true
+			else
+				false
+		;
+
+		//Keeps track of whether the mask mandate has been implemented or not for students
+		mask-implemented-students = 
+			if (mask_counter_students >= 1)
+				then true
+			else
+				false
+		;
+
+		//vaccinates if all_vaccinate is true, or if student_vaccinate is true and the agent is a student, and the vaccine has not been implemented yet, otherwise false
+		vaccinated'(?a) = 
+			if ((all_vaccinate ^ (~vaccine_implemented)) | (student_vaccinate ^ (~vaccine_implemented_students) ^ AGENT_STUDENT(?a)))
+				then 
+					if (AGENT_AGE(?a) == 0)
+						then Bernoulli(0.251)
+					else if (AGENT_AGE(?a) == 1)
+						then Bernoulli(0.771)
+					else if (AGENT_AGE(?a) == 2)
+						then Bernoulli(0.819)
+					else if (AGENT_AGE(?a) == 3)
+						then Bernoulli(0.851)
+					else if (AGENT_AGE(?a) == 4)
+						then Bernoulli(0.883)
+					else if (AGENT_AGE(?a) == 5)
+						then Bernoulli(0.885)
+					else if (AGENT_AGE(?a) == 6)
+						then Bernoulli(0.940)
+					else if (AGENT_AGE(?a) == 7)
+						then Bernoulli(0.982)
+					else if (AGENT_AGE(?a) == 8)
+						then Bernoulli(0.990)
+					else
+						vaccinated(?a)
+
+			else
+				vaccinated(?a)
+		;
+
+	};
+
+	//reward calculation
+	reward =
+	
+	    [sum_{?a : agent} [ if (AGENT_STUDENT(?a)) then PENALTY_MASK_MANDATE_STUDENTS*masked(?a) 
+	  						else PENALTY_MASK_MANDATE_ALL*masked(?a)]]
+	  + [sum_{?a : agent} [ if (AGENT_STUDENT(?a)) then PENALTY_VACCINE_MANDATE_STUDENTS*vaccinated(?a) 
+	  						else PENALTY_VACCINE_MANDATE_ALL*vaccinated(?a)]]
+	  +
+
+		if ((sum_{?a: agent} [hospitalized_non_ICU(?a)]) > HOSPITAL_BEDS_NON_ICU)
+			then 
+				PENALTY_NON_ICU_CAPACITY * ((sum_{?a: agent} [hospitalized_non_ICU(?a)]) - HOSPITAL_BEDS_NON_ICU)
+		else
+			0	
+
+	+
+
+		if ((sum_{?a: agent} [hospitalized_ICU(?a)]) > HOSPITAL_BEDS_ICU)
+			then 
+				PENALTY_ICU_CAPACITY * ((sum_{?a: agent} [hospitalized_ICU(?a)]) - HOSPITAL_BEDS_ICU)
+		else
+			0
+
+	;
+}
+
